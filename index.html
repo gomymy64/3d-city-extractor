@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D City Extractor</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- MapLibre GL -->
+    <link href="https://unpkg.com/maplibre-gl@3.3.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@3.3.1/dist/maplibre-gl.js"></script>
+
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #f0f0f3;
+            --panel: rgba(255, 255, 255, 0.72);
+            --border: rgba(255, 255, 255, 0.5);
+            --shadow: 0 20px 60px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.06);
+            --blue: #0066cc;
+            --blue-h: #005bb5;
+            --green: #30d158;
+            --red: #ff3b30;
+            --text: #1d1d1f;
+            --sub: #6e6e73;
+            --radius: 18px;
+            --r-sm: 12px;
+            --ease: cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── MAP LAYERS ── */
+        #map-2d,
+        #map-3d {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            transition: opacity 0.5s var(--ease), visibility 0.5s;
+        }
+
+        #map-2d {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #map-3d {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        #map-3d.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #map-2d.hidden-map {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        /* ── CROSSHAIR ── */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 24px;
+            height: 24px;
+            pointer-events: none;
+            z-index: 500;
+        }
+
+        #crosshair::before,
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            background: #1d1d1f;
+            border-radius: 2px;
+        }
+
+        #crosshair::before {
+            top: 11px;
+            left: 0;
+            width: 24px;
+            height: 2px;
+        }
+
+        #crosshair::after {
+            top: 0;
+            left: 11px;
+            width: 2px;
+            height: 24px;
+        }
+
+        /* ── MODE BADGE ── */
+        #mode-badge {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--panel);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 30px;
+            font-size: 13px;
+            font-weight: 500;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.07);
+            transition: all 0.4s var(--ease);
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            transition: background 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        .dot.green {
+            background: var(--green);
+            box-shadow: 0 0 8px rgba(48, 209, 88, 0.6);
+        }
+
+        .dot.blue {
+            background: var(--blue);
+            box-shadow: 0 0 8px rgba(0, 102, 204, 0.6);
+        }
+
+        /* ── PANEL ── */
+        #panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 600;
+            width: 360px;
+            background: var(--panel);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 28px;
+            transition: transform 0.4s var(--ease), opacity 0.4s ease;
+        }
+
+        .panel-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+
+        .panel-logo svg {
+            color: var(--blue);
+        }
+
+        .panel-logo h1 {
+            font-size: 19px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+
+        .panel-sub {
+            font-size: 13px;
+            color: var(--sub);
+            line-height: 1.55;
+            margin-bottom: 22px;
+        }
+
+        /* ── INFO BOX ── */
+        .info-box {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            background: rgba(0, 102, 204, 0.07);
+            border-radius: var(--r-sm);
+            padding: 12px 14px;
+            margin-bottom: 18px;
+            font-size: 12.5px;
+            color: #3d5a80;
+            line-height: 1.5;
+        }
+
+        .info-box svg {
+            flex-shrink: 0;
+            color: var(--blue);
+            margin-top: 1px;
+        }
+
+        /* ── BUTTONS ── */
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 13px 20px;
+            border: none;
+            border-radius: var(--r-sm);
+            font-family: inherit;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn:active {
+            transform: scale(0.975);
+        }
+
+        .btn-primary {
+            background: var(--blue);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: var(--blue-h);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-outline {
+            background: rgba(0, 0, 0, 0.04);
+            border: 1px solid rgba(0, 0, 0, 0.07);
+            color: var(--text);
+        }
+
+        .btn-outline:hover {
+            background: rgba(0, 0, 0, 0.07);
+        }
+
+        .btn-dark {
+            background: #1d1d1f;
+            color: #fff;
+        }
+
+        .btn-dark:hover {
+            background: #2d2d2f;
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--sub);
+            font-size: 13px;
+            text-decoration: underline;
+        }
+
+        .btn-ghost:hover {
+            color: var(--text);
+        }
+
+        /* ── LOADER INSIDE BUTTON ── */
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── STEPS ── */
+        #step-1 {
+            display: block;
+        }
+
+        #step-2 {
+            display: none;
+        }
+
+        #step-2.visible {
+            display: block;
+            animation: rise 0.45s var(--ease) both;
+        }
+
+        @keyframes rise {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ── SUCCESS HEADER ── */
+        .success-head {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            margin-bottom: 18px;
+        }
+
+        .success-circle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: rgba(48, 209, 88, 0.12);
+            color: var(--green);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+
+        .success-head h2 {
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        /* ── STATS ── */
+        .stats-box {
+            background: #fff;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            border-radius: var(--r-sm);
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            font-size: 13.5px;
+            color: var(--sub);
+            line-height: 1.7;
+        }
+
+        .stats-box b {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .gap {
+            height: 10px;
+        }
+
+        .gap-sm {
+            height: 6px;
+        }
+
+        /* ── TOAST ── */
+        #toast {
+            position: fixed;
+            top: -80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 22px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: 500;
+            white-space: nowrap;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        #toast.show {
+            top: 20px;
+        }
+
+        #toast.success {
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--text);
+        }
+
+        #toast.error {
+            background: rgba(255, 59, 48, 0.88);
+            color: #fff;
+        }
+
+        /* leaflet controls reposition */
+        .leaflet-control-zoom {
+            margin-bottom: 20px !important;
+            margin-right: 20px !important;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Toast notification -->
+    <div id="toast"></div>
+
+    <!-- 2D map -->
+    <div id="map-2d">
+        <div id="crosshair"></div>
+    </div>
+
+    <!-- 3D map -->
+    <div id="map-3d"></div>
+
+    <!-- Mode badge -->
+    <div id="mode-badge">
+        <span class="dot green" id="status-dot"></span>
+        <span id="mode-text">Выбор области</span>
+    </div>
+
+    <!-- Control panel -->
+    <div id="panel">
+        <div class="panel-logo">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" />
+                <line x1="9" y1="3" x2="9" y2="21" />
+                <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+            <h1>3D City Extractor</h1>
+        </div>
+        <p class="panel-sub">Загрузите 3D-модели зданий из OpenStreetMap для видимой области карты.</p>
+
+        <!-- STEP 1 -->
+        <div id="step-1">
+            <div class="info-box">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <span>Приблизьте карту к нужному кварталу. Очень большая область вызовет ошибку сервера.</span>
+            </div>
+            <button class="btn btn-primary" id="extract-btn">
+                <span id="btn-label">Сгенерировать 3D GeoJSON</span>
+            </button>
+        </div>
+
+        <!-- STEP 2 -->
+        <div id="step-2">
+            <div class="success-head">
+                <div class="success-circle">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                </div>
+                <h2>Файл готов!</h2>
+            </div>
+
+            <div class="stats-box" id="stats-text"></div>
+
+            <div class="info-box" style="margin-bottom: 16px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l-4.75 4.75"></path>
+                </svg>
+                <span><b>Управление камерой:</b> Зажмите <b>Правую кнопку мыши</b> (ПКМ) и тяните. На телефоне крутите
+                    двумя пальцами.</span>
+            </div>
+
+            <button class="btn btn-outline" id="download-btn">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Скачать .geojson
+            </button>
+            <div class="gap-sm"></div>
+            <button class="btn btn-dark" id="kepler-btn">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                Открыть Kepler.gl
+            </button>
+            <div class="gap"></div>
+            <button class="btn btn-ghost" id="reset-btn">← Выбрать другой район</button>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            // ── MAP INIT ──
+            const map2d = L.map('map-2d', { zoomControl: false }).setView([54.1879, 45.1869], 15);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                attribution: '© OSM © CARTO', maxZoom: 19
+            }).addTo(map2d);
+            L.control.zoom({ position: 'bottomright' }).addTo(map2d);
+
+            let map3d = null;
+            let geoData = null;
+
+            // ── ELEMENTS ──
+            const extractBtn = document.getElementById('extract-btn');
+            const btnLabel = document.getElementById('btn-label');
+            const step1 = document.getElementById('step-1');
+            const step2 = document.getElementById('step-2');
+            const statsEl = document.getElementById('stats-text');
+            const map2dEl = document.getElementById('map-2d');
+            const map3dEl = document.getElementById('map-3d');
+            const modeText = document.getElementById('mode-text');
+            const statusDot = document.getElementById('status-dot');
+            const toast = document.getElementById('toast');
+
+            // ── EXTRACT ──
+            extractBtn.addEventListener('click', async () => {
+                const bounds = map2d.getBounds();
+                // Prevent oversized query
+                if (Math.abs(bounds.getNorth() - bounds.getSouth()) > 0.05 ||
+                    Math.abs(bounds.getEast() - bounds.getWest()) > 0.07) {
+                    showToast('Область слишком большая — приблизьте карту', 'error');
+                    return;
+                }
+
+                setLoading(true);
+
+                const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+                const query = `[out:json][timeout:25];(way["building"](${bbox});relation["building"](${bbox}););out geom;`;
+
+                const endpoints = [
+                    'https://overpass-api.de/api/interpreter',
+                    'https://overpass.kumi.systems/api/interpreter',
+                    'https://lz4.overpass-api.de/api/interpreter',
+                    'https://z.overpass-api.de/api/interpreter'
+                ];
+
+                let data = null;
+                let lastError = null;
+
+                for (const endpoint of endpoints) {
+                    try {
+                        const res = await fetch(endpoint, {
+                            method: 'POST',
+                            body: 'data=' + encodeURIComponent(query)
+                        });
+
+                        if (!res.ok) {
+                            throw new Error(`Overpass API error ${res.status} on ${endpoint}`);
+                        }
+
+                        data = await res.json();
+                        break; // Success, exit the loop
+                    } catch (err) {
+                        console.warn(err.message);
+                        lastError = err;
+                        // Continue to the next endpoint
+                    }
+                }
+
+                try {
+                    if (!data) {
+                        throw new Error('Все серверы Overpass API недоступны (Тайм-аут). Попробуйте позже.');
+                    }
+
+                    if (!data.elements || data.elements.length === 0)
+                        throw new Error('Здания не найдены в этой области');
+
+                    geoData = buildGeoJSON(data.elements);
+                    updateStats(geoData);
+
+                    // Auto-download
+                    triggerDownload(geoData);
+
+                    // Switch UI
+                    step1.style.display = 'none';
+                    step2.style.display = 'block';
+                    step2.classList.add('visible');
+
+                    // Show 3D
+                    show3D(map2d.getCenter(), map2d.getZoom());
+                    showToast('Файл скачан. Откройте в Kepler.gl!', 'success');
+
+                } catch (err) {
+                    showToast(err.message, 'error');
+                } finally {
+                    setLoading(false);
+                }
+            });
+
+            document.getElementById('download-btn').addEventListener('click', () => triggerDownload(geoData));
+            document.getElementById('kepler-btn').addEventListener('click', () => window.open('https://kepler.gl/demo', '_blank'));
+            document.getElementById('reset-btn').addEventListener('click', resetView);
+
+            // ── BUILD GEOJSON ──
+            function buildGeoJSON(elements) {
+                const features = [];
+                let withLevels = 0;
+
+                elements.forEach(el => {
+                    if (el.type !== 'way' || !el.geometry) return;
+                    const tags = el.tags || {};
+
+                    let levels = parseInt(tags['building:levels']);
+                    if (!isNaN(levels) && levels > 0) withLevels++;
+                    else levels = 2;  // sensible fallback
+
+                    // Use tagged height if present, else estimate
+                    let height;
+                    const taggedH = parseFloat(tags['height']);
+                    height = (!isNaN(taggedH) && taggedH > 0) ? taggedH : levels * 3.5;
+
+                    const coords = el.geometry.map(n => [n.lon, n.lat]);
+                    // Close polygon
+                    if (coords.length > 0) {
+                        const first = coords[0], last = coords[coords.length - 1];
+                        if (first[0] !== last[0] || first[1] !== last[1]) coords.push(first);
+                    }
+                    if (coords.length < 4) return; // skip degenerate polys
+
+                    features.push({
+                        type: 'Feature',
+                        properties: {
+                            id: el.id,
+                            levels,
+                            height,
+                            street: tags['addr:street'] || '',
+                            housenumber: tags['addr:housenumber'] || '',
+                            name: tags['name'] || ''
+                        },
+                        geometry: { type: 'Polygon', coordinates: [coords] }
+                    });
+                });
+
+                features._withLevels = withLevels; // stash for stats
+                return { type: 'FeatureCollection', features };
+            }
+
+            function updateStats(geo) {
+                const total = geo.features.length;
+                const wl = geo.features._withLevels || 0;
+                statsEl.innerHTML =
+                    `Зданий найдено: <b>${total}</b><br>` +
+                    `С известной этажностью: <b>${wl}</b> (${total ? Math.round(wl / total * 100) : 0}%)`;
+            }
+
+            // ── 3D PREVIEW ──
+            function show3D(center, zoom) {
+                map2dEl.classList.add('hidden-map');
+                map3dEl.classList.add('active');
+                modeText.textContent = '3D Предпросмотр';
+                statusDot.className = 'dot blue';
+
+                if (!map3d) {
+                    map3d = new maplibregl.Map({
+                        container: 'map-3d',
+                        style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+                        center: [center.lng, center.lat],
+                        zoom: Math.max(zoom - 1, 12),
+                        pitch: 58, bearing: -18,
+                        antialias: true,
+                        attributionControl: false
+                    });
+                    map3d.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+                    map3d.on('load', addBuildings);
+                } else {
+                    map3d.flyTo({ center: [center.lng, center.lat], zoom: Math.max(zoom - 1, 12), pitch: 58, essential: true });
+                    const src = map3d.getSource('buildings');
+                    if (src) src.setData(geoData);
+                    else addBuildings();
+                }
+            }
+
+            function addBuildings() {
+                if (!map3d || !geoData) return;
+                if (map3d.getSource('buildings')) return;
+
+                map3d.addSource('buildings', { type: 'geojson', data: geoData });
+                map3d.addLayer({
+                    id: 'buildings-3d',
+                    type: 'fill-extrusion',
+                    source: 'buildings',
+                    paint: {
+                        'fill-extrusion-color': [
+                            'interpolate', ['linear'], ['get', 'height'],
+                            0, '#f8fafc',
+                            15, '#f1f5f9',
+                            30, '#e2e8f0',
+                            60, '#cbd5e1',
+                            100, '#94a3b8'
+                        ],
+                        'fill-extrusion-height': ['get', 'height'],
+                        'fill-extrusion-base': 0,
+                        'fill-extrusion-opacity': 0.92,
+                        'fill-extrusion-vertical-gradient': true
+                    }
+                });
+            }
+
+            // ── DOWNLOAD ──
+            function triggerDownload(geo) {
+                if (!geo) return;
+                const blob = new Blob([JSON.stringify(geo)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '3d_buildings.geojson';
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+
+            // ── RESET ──
+            function resetView() {
+                step2.style.display = 'none';
+                step2.classList.remove('visible');
+                step1.style.display = 'block';
+                map3dEl.classList.remove('active');
+                map2dEl.classList.remove('hidden-map');
+                modeText.textContent = 'Выбор области';
+                statusDot.className = 'dot green';
+            }
+
+            // ── LOADING STATE ──
+            function setLoading(on) {
+                extractBtn.disabled = on;
+                if (on) {
+                    btnLabel.textContent = '';
+                    const s = document.createElement('div');
+                    s.className = 'spinner'; s.id = 'spin';
+                    extractBtn.appendChild(s);
+                } else {
+                    const s = document.getElementById('spin');
+                    if (s) s.remove();
+                    btnLabel.textContent = 'Сгенерировать 3D GeoJSON';
+                }
+            }
+
+            // ── TOAST ──
+            let toastTimer;
+            function showToast(msg, type = 'success') {
+                toast.textContent = msg;
+                toast.className = 'show ' + type;
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(() => { toast.className = type; }, 3500);
+            }
+        })();
+    </script>
+</body>
+
+</html>
